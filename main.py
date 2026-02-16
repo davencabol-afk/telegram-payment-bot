@@ -28,6 +28,7 @@ daily_transactions = []
 is_paused = False
 is_processing = False
 process_delay = (60, 120)  # delay antar transaksi
+ME_ID = None  # akan diisi setelah client.start()
 
 # ==========================
 # LOAD & SAVE
@@ -87,22 +88,18 @@ async def process_transaction(event):
     ewallet, rek, nominal = data
     today_str = datetime.now().strftime("%Y-%m-%d")
 
-    # cek blocked
     if rek in blocked_accounts:
         await event.reply(f"🚫 blocked (rekening: {rek})", reply_to=event.id)
         return
 
-    # cek duplicate hari ini
     for trx in daily_transactions:
         if trx["rek"] == rek and trx["nominal"] == nominal:
             await event.reply("🔄 duplicate (already processed)", reply_to=event.id)
             return
 
-    # forward ke bot
     formatted = f"{ewallet}B.{rek}.{nominal}.{PIN}"
     await client.send_message(target_bot, formatted)
 
-    # simpan daily
     daily_transactions.append({
         "rek": rek,
         "nominal": nominal,
@@ -139,20 +136,15 @@ async def handler(event):
     transaction_queue.append(event.message)
 
 # ==========================
-# UTILITY: CEK SELF (PM / Saved Messages)
+# UTILITY
 # ==========================
-async def is_self(event):
-    me = await client.get_me()
-    return event.sender_id == me.id
+def pm_or_saved(event):
+    return event.is_private or (ME_ID and event.chat_id == ME_ID)
 
 # ==========================
 # COMMANDS PRIVATE / Saved Messages
 # ==========================
-def pm_or_saved(event):
-    return event.is_private or event.chat_id == (client.loop.run_until_complete(client.get_me())).id
-
-# BLOCK
-@client.on(events.NewMessage(pattern=r'^/block (\d+)$'))
+@client.on(events.NewMessage(pattern=r'^/block (\d+)$', incoming=True))
 async def block_account(event):
     if not pm_or_saved(event):
         return
@@ -161,8 +153,7 @@ async def block_account(event):
     save_json("blocked.json", list(blocked_accounts))
     await event.reply(f"✅ rekening {rekening} has been blocked")
 
-# UNBLOCK
-@client.on(events.NewMessage(pattern=r'^/unblock (\d+)$'))
+@client.on(events.NewMessage(pattern=r'^/unblock (\d+)$', incoming=True))
 async def unblock_account(event):
     if not pm_or_saved(event):
         return
@@ -174,8 +165,7 @@ async def unblock_account(event):
     else:
         await event.reply(f"⚠️ rekening {rekening} tidak ada di blocked list")
 
-# PAUSED
-@client.on(events.NewMessage(pattern=r'^/paused$'))
+@client.on(events.NewMessage(pattern=r'^/paused$', incoming=True))
 async def paused_system(event):
     if not pm_or_saved(event):
         return
@@ -183,8 +173,7 @@ async def paused_system(event):
     is_paused = True
     await event.reply("⏸ proses forward transaksi dihentikan sementara")
 
-# RESUME
-@client.on(events.NewMessage(pattern=r'^/resume$'))
+@client.on(events.NewMessage(pattern=r'^/resume$', incoming=True))
 async def resume_system(event):
     if not pm_or_saved(event):
         return
@@ -197,6 +186,14 @@ async def resume_system(event):
 # ==========================
 client.start()
 print("Userbot running...")
+
+# ambil ME_ID sekali saja
+async def init_me():
+    global ME_ID
+    me = await client.get_me()
+    ME_ID = me.id
+
 loop = asyncio.get_event_loop()
+loop.run_until_complete(init_me())
 loop.create_task(process_queue())
 loop.run_forever()
